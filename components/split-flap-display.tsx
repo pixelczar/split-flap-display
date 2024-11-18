@@ -1,6 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from './ui/button';
-import { ArrowUpCircle, Play, Pause, List, X, Settings2, Plus } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { 
+  faArrowCircleUp, 
+  faPlay, 
+  faPause, 
+  faSliders, 
+  faXmark, 
+  faPlus 
+} from '@fortawesome/free-solid-svg-icons';
 import {
   Dialog,
   DialogContent,
@@ -204,10 +212,18 @@ const SplitFlapDisplay = () => {
               size="sm"
               className="bg-slate-800/30 hover:bg-slate-700/30 backdrop-blur-sm"
             >
-              <List className="h-5 w-5" />
+              <FontAwesomeIcon icon={faSliders} className="h-5 w-5" />
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700">
+          <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700
+            animate-fade-in
+            data-[state=open]:animate-in data-[state=closed]:animate-out
+            data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0
+            data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95
+            data-[state=closed]:slide-out-to-left-1/2 data-[state=open]:slide-in-from-left-1/2
+            data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-top-[48%]
+            duration-300 transition-all"
+          >
             <DialogHeader>
               <DialogTitle>Message Queue</DialogTitle>
             </DialogHeader>
@@ -220,13 +236,13 @@ const SplitFlapDisplay = () => {
                   className="hover:bg-slate-700/30"
                 >
                   {isPlaying ? (
-                    <Pause className="h-5 w-5" />
+                    <FontAwesomeIcon icon={faPause} className="h-5 w-5" />
                   ) : (
-                    <Play className="h-5 w-5" />
+                    <FontAwesomeIcon icon={faPlay} className="h-5 w-5" />
                   )}
                 </Button>
                 <div className="flex items-center space-x-2 text-sm">
-                  <Settings2 className="h-4 w-4 text-white" />
+                  <FontAwesomeIcon icon={faSliders} className="h-4 w-4 text-white" />
                   <Input
                     type="number"
                     value={interval}
@@ -254,7 +270,7 @@ const SplitFlapDisplay = () => {
                   className="hover:bg-slate-700/30"
                   disabled={!newQueueMessage.trim()}
                 >
-                  <Plus className="h-4 w-4" />
+                  <FontAwesomeIcon icon={faPlus} className="h-4 w-4" />
                 </Button>
               </div>
 
@@ -276,7 +292,7 @@ const SplitFlapDisplay = () => {
                         size="sm"
                         className="h-6 w-6 hover:bg-slate-700/30 "
                       >
-                        <X className="h-4 w-4" />
+                        <FontAwesomeIcon icon={faXmark} className="h-4 w-4" />
                       </Button>
                     </div>
                   ))}
@@ -309,8 +325,8 @@ const SplitFlapDisplay = () => {
             />
             <Button 
               onClick={handleSubmit}
-              variant="ghost" 
-              size="sm"
+              variant="ghost"
+              size="icon"
               disabled={!inputText.trim()}
               className="absolute right-2 top-8 h-8 w-8 -translate-y-[22px] transition-all
                        bg-transparent hover:bg-blue-500/10 disabled:hover:bg-transparent
@@ -318,7 +334,7 @@ const SplitFlapDisplay = () => {
                        data-[eligible=true]:bg-blue-500/10 text-slate-400 data-[eligible=true]:text-blue-400"
               data-eligible={!!inputText.trim()}
             >
-              <ArrowUpCircle className="h-5 w-5 transition-colors duration-200 
+              <FontAwesomeIcon icon={faArrowCircleUp} className="h-5 w-5 transition-colors duration-200 
                                       data-[eligible=true]:text-blue-400
                                       group-hover:text-blue-200 group-disabled:group-hover:text-slate-400 group-disabled:cursor-not-allowed" />
             </Button>
