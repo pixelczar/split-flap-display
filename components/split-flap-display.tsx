@@ -326,7 +326,6 @@ const SplitFlapDisplay = () => {
             <Button 
               onClick={handleSubmit}
               variant="ghost"
-              size="icon"
               disabled={!inputText.trim()}
               className="absolute right-2 top-8 h-8 w-8 -translate-y-[22px] transition-all
                        bg-transparent hover:bg-blue-500/10 disabled:hover:bg-transparent
