@@ -12,9 +12,9 @@ import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 
 const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ?!.,';
-const MAX_CHARS = 48;
+const MAX_CHARS = 64;
 const CHARS_PER_LINE = 16;
-const NUM_LINES = 3;
+const NUM_LINES = 4;
 
 const SplitFlapDisplay = () => {
   const [targetText, setTargetText] = useState('HELLO WORLD');
@@ -29,6 +29,10 @@ const SplitFlapDisplay = () => {
   const [interval, setInterval] = useState(9000);
   const [currentQueueIndex, setCurrentQueueIndex] = useState(0);
   const [newQueueMessage, setNewQueueMessage] = useState('');
+
+  // Add new state near other state declarations
+  const [messageHistory, setMessageHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
 
   const animateToChar = (currentChar: string, targetChar: string) => {
     if (currentChar === targetChar) return currentChar;
@@ -103,13 +107,31 @@ const SplitFlapDisplay = () => {
   const handleSubmit = () => {
     if (!inputText.trim()) return;
     displayMessage(inputText);
+    setMessageHistory(prev => [inputText, ...prev]);
     setInputText('');
+    setHistoryIndex(-1);
   };
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (messageHistory.length > 0) {
+        const newIndex = historyIndex + 1;
+        if (newIndex < messageHistory.length) {
+          setHistoryIndex(newIndex);
+          setInputText(messageHistory[newIndex]);
+        }
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex > -1) {
+        const newIndex = historyIndex - 1;
+        setHistoryIndex(newIndex);
+        setInputText(newIndex === -1 ? '' : messageHistory[newIndex]);
+      }
     }
   };
 
@@ -144,24 +166,31 @@ const SplitFlapDisplay = () => {
       <div className="flex-grow flex items-center">
         <div className="bg-slate-900/50 p-12 rounded-lg backdrop-blur-sm">
           <div className="font-mono text-3xl space-y-3">
-            {displayLines.map((line, lineIndex) => (
-              <div key={lineIndex} className="flex justify-center">
-                {line.split('').map((char, charIndex) => (
-                  <span
-                    key={charIndex}
-                    className="inline-flex items-center justify-center w-12 h-16 bg-slate-800/80 mx-0.5 rounded transition-all duration-900"
-                    style={{
-                      transform: isAnimating ? 'rotateX(10deg)' : 'none',
-                      textShadow: '0 0 5px rgba(255,255,255,0.3)',
-                    }}
-                  >
-                    <span className={char === ' ' ? 'text-slate-700' : 'text-white'}>
-                      {char === ' ' ? '•' : char}
+            {displayLines.map((line, lineIndex) => {
+              // Calculate padding needed to center the text
+              const emptySpaces = CHARS_PER_LINE - line.trim().length;
+              const leftPadding = Math.floor(emptySpaces / 2);
+              const centeredLine = ' '.repeat(leftPadding) + line.trim() + ' '.repeat(emptySpaces - leftPadding);
+              
+              return (
+                <div key={lineIndex} className="flex justify-center">
+                  {centeredLine.split('').map((char, charIndex) => (
+                    <span
+                      key={charIndex}
+                      className="inline-flex items-center justify-center w-12 h-16 bg-slate-800/80 mx-0.5 rounded transition-all duration-300"
+                      style={{
+                        transform: isAnimating ? 'rotateX(10deg)' : 'none',
+                        textShadow: '0 0 5px rgba(255,255,255,0.3)',
+                      }}
+                    >
+                      <span className={char === ' ' ? 'text-slate-700' : 'text-white'}>
+                        {char === ' ' ? '•' : char}
+                      </span>
                     </span>
-                  </span>
-                ))}
-              </div>
-            ))}
+                  ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -283,15 +312,15 @@ const SplitFlapDisplay = () => {
               variant="ghost" 
               size="icon"
               disabled={!inputText.trim()}
-              className="absolute right-2 top-8 h-8 w-8 -translate-y-[22px] transition-all duration-200
+              className="absolute right-2 top-8 h-8 w-8 -translate-y-[22px] transition-all
                        bg-transparent hover:bg-blue-500/10 disabled:hover:bg-transparent
                        group disabled:opacity-40 disabled:cursor-not-allowed
-                       data-[eligible=true]:bg-blue-500/10"
+                       data-[eligible=true]:bg-blue-500/10 text-slate-400 data-[eligible=true]:text-blue-400"
               data-eligible={!!inputText.trim()}
             >
               <ArrowUpCircle className="h-5 w-5 transition-colors duration-200 
-                                      data-[eligible=true]:text-blue-400 text-slate-400
-                                      group-hover:text-blue-400 group-disabled:group-hover:text-slate-400" />
+                                      data-[eligible=true]:text-blue-400
+                                      group-hover:text-blue-200 group-disabled:group-hover:text-slate-400 group-disabled:cursor-not-allowed" />
             </Button>
             <div className="h-1 bg-slate-700/50 mt-0.5">
               <div 
