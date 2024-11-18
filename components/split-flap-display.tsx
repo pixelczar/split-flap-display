@@ -20,9 +20,9 @@ import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 
 const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ?!.,';
-const MAX_CHARS = 64;
+const MAX_CHARS = 80;
 const CHARS_PER_LINE = 16;
-const NUM_LINES = 4;
+const NUM_LINES = 5;
 
 const SplitFlapDisplay = () => {
   const [targetText, setTargetText] = useState('HELLO WORLD');
@@ -164,41 +164,107 @@ const SplitFlapDisplay = () => {
     setIsPlaying(!isPlaying);
   };
 
-  // Split display text into lines
-  const displayLines = Array.from({ length: NUM_LINES }, (_, lineIndex) => 
-    displayText.slice(lineIndex * CHARS_PER_LINE, (lineIndex + 1) * CHARS_PER_LINE)
-  );
+  // Modify the display lines logic to handle word wrapping
+  const formatDisplayLines = (text: string) => {
+    const lines: string[] = Array(NUM_LINES).fill('');
+    const textLines = text.split('\n');
+    
+    const centerLine = (text: string): string => {
+      const truncatedText = text.slice(0, CHARS_PER_LINE);
+      const totalPadding = CHARS_PER_LINE - truncatedText.length;
+      const leftPadding = Math.floor(totalPadding / 2);
+      const rightPadding = totalPadding - leftPadding;
+      return ' '.repeat(leftPadding) + truncatedText + ' '.repeat(rightPadding);
+    };
+
+    // First, format all the lines without worrying about display position
+    const formattedLines: string[] = [];
+    
+    for (const textLine of textLines) {
+      // Handle empty lines from shift+enter
+      if (textLine.trim() === '') {
+        formattedLines.push(centerLine(''));
+        continue;
+      }
+
+      const words = textLine.split(' ').filter(word => word.length > 0);
+      let currentLineWords: string[] = [];
+
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        const potentialLine = [...currentLineWords, word].join(' ');
+
+        if (potentialLine.length <= CHARS_PER_LINE) {
+          currentLineWords.push(word);
+          if (i === words.length - 1) {
+            formattedLines.push(centerLine(currentLineWords.join(' ')));
+          }
+        } else {
+          if (currentLineWords.length > 0) {
+            formattedLines.push(centerLine(currentLineWords.join(' ')));
+          }
+          
+          if (word.length <= CHARS_PER_LINE) {
+            currentLineWords = [word];
+            if (i === words.length - 1) {
+              formattedLines.push(centerLine(word));
+            }
+          } else {
+            formattedLines.push(centerLine(word.slice(0, CHARS_PER_LINE)));
+            currentLineWords = [];
+          }
+        }
+      }
+    }
+
+    // Now position the formatted lines in the middle of the display area
+    const startingLine = Math.max(0, Math.floor((NUM_LINES - formattedLines.length) / 2));
+    
+    // Fill lines before content with spaces
+    for (let i = 0; i < startingLine; i++) {
+      lines[i] = ' '.repeat(CHARS_PER_LINE);
+    }
+
+    // Add the formatted content
+    for (let i = 0; i < formattedLines.length && startingLine + i < NUM_LINES; i++) {
+      lines[startingLine + i] = formattedLines[i];
+    }
+
+    // Fill any remaining lines with spaces
+    for (let i = startingLine + formattedLines.length; i < NUM_LINES; i++) {
+      lines[i] = ' '.repeat(CHARS_PER_LINE);
+    }
+
+    return lines;
+  };
+
+  // Replace the displayLines calculation in the render section with:
+  const displayLines = formatDisplayLines(displayText);
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
       <div className="flex-grow flex items-center">
         <div className="bg-slate-900/50 p-12 rounded-lg backdrop-blur-sm">
           <div className="font-mono text-3xl space-y-3">
-            {displayLines.map((line, lineIndex) => {
-              // Calculate padding needed to center the text
-              const emptySpaces = CHARS_PER_LINE - line.trim().length;
-              const leftPadding = Math.floor(emptySpaces / 2);
-              const centeredLine = ' '.repeat(leftPadding) + line.trim() + ' '.repeat(emptySpaces - leftPadding);
-              
-              return (
-                <div key={lineIndex} className="flex justify-center">
-                  {centeredLine.split('').map((char, charIndex) => (
-                    <span
-                      key={charIndex}
-                      className="inline-flex items-center justify-center w-12 h-16 bg-slate-800/80 mx-0.5 rounded transition-all duration-300"
-                      style={{
-                        transform: isAnimating ? 'rotateX(10deg)' : 'none',
-                        textShadow: '0 0 5px rgba(255,255,255,0.3)',
-                      }}
-                    >
-                      <span className={char === ' ' ? 'text-slate-700' : 'text-white'}>
-                        {char === ' ' ? '•' : char}
-                      </span>
+            {displayLines.map((line, lineIndex) => (
+              <div key={lineIndex} className="flex justify-center">
+                {line.split('').map((char, charIndex) => (
+                  <span
+                    key={charIndex}
+                    className="inline-flex items-center justify-center w-12 h-16 bg-slate-800/80 mx-1 rounded transition-all duration-300 border border-slate-700/30"
+                    style={{
+                      transform: isAnimating ? 'rotateX(10deg)' : 'none',
+                      textShadow: '0 0 5px rgba(255,255,255,0.3)',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                    }}
+                  >
+                    <span className={char === ' ' ? 'text-slate-700' : 'text-white'}>
+                      {char === ' ' ? '•' : char}
                     </span>
-                  ))}
-                </div>
-              );
-            })}
+                  </span>
+                ))}
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -342,7 +408,7 @@ const SplitFlapDisplay = () => {
                 className="h-full transition-all duration-200 ease-in-out rounded-none"
                 style={{ 
                   width: `${(inputText.length / MAX_CHARS) * 100}%`,
-                  backgroundColor: inputText.length === MAX_CHARS ? '#ef4444' : '#3b82f6'
+                  backgroundColor: inputText.length === MAX_CHARS ? '#dc2626' : '#3b82f666'
                 }}
               />
             </div>
