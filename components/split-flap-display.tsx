@@ -24,7 +24,7 @@ const SplitFlapDisplay = () => {
   const [isFocused, setIsFocused] = useState(false);
   
   // New state for message queue functionality
-  const [messageQueue, setMessageQueue] = useState([]);
+  const [messageQueue, setMessageQueue] = useState<string[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [interval, setInterval] = useState(9000);
   const [currentQueueIndex, setCurrentQueueIndex] = useState(0);
@@ -112,7 +112,7 @@ const SplitFlapDisplay = () => {
     setHistoryIndex(-1);
   };
 
-  const handleKeyPress = (e) => {
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -137,12 +137,12 @@ const SplitFlapDisplay = () => {
 
   const addToQueue = () => {
     if (newQueueMessage.trim()) {
-      setMessageQueue(prev => [...prev, newQueueMessage]);
+      setMessageQueue((prev) => [...prev, newQueueMessage]);
       setNewQueueMessage('');
     }
   };
 
-  const removeFromQueue = (index) => {
+  const removeFromQueue = (index: number) => {
     setMessageQueue(prev => prev.filter((_, i) => i !== index));
     if (currentQueueIndex >= index) {
       setCurrentQueueIndex(prev => Math.max(0, prev - 1));
@@ -201,7 +201,7 @@ const SplitFlapDisplay = () => {
           <DialogTrigger asChild>
             <Button 
               variant="ghost" 
-              size="icon"
+              size="sm"
               className="bg-slate-800/30 hover:bg-slate-700/30 backdrop-blur-sm"
             >
               <List className="h-5 w-5" />
@@ -216,7 +216,7 @@ const SplitFlapDisplay = () => {
                 <Button
                   onClick={togglePlayback}
                   variant="ghost"
-                  size="icon"
+                  size="sm"
                   className="hover:bg-slate-700/30"
                 >
                   {isPlaying ? (
@@ -297,7 +297,7 @@ const SplitFlapDisplay = () => {
             <textarea
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={handleKeyPress}
+              onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => handleKeyPress(e)}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               placeholder="Type your message..."
@@ -310,7 +310,7 @@ const SplitFlapDisplay = () => {
             <Button 
               onClick={handleSubmit}
               variant="ghost" 
-              size="icon"
+              size="sm"
               disabled={!inputText.trim()}
               className="absolute right-2 top-8 h-8 w-8 -translate-y-[22px] transition-all
                        bg-transparent hover:bg-blue-500/10 disabled:hover:bg-transparent
