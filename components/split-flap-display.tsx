@@ -22,7 +22,7 @@ import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { Switch } from "./ui/switch"
 import { Label } from "@/components/ui/label"
-import { supabase, type Message } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 // import "@/components/ui/switch.css";
