@@ -7,7 +7,9 @@ import {
   faPause, 
   faSliders, 
   faXmark, 
-  faPlus 
+  faPlus, 
+  faHistory, 
+  faTrash 
 } from '@fortawesome/free-solid-svg-icons';
 import {
   Dialog,
@@ -18,11 +20,23 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
+import { Switch } from "./ui/switch"
+import { Label } from "@/components/ui/label"
+import { supabase, type Message } from '@/lib/supabase';
+import { RealtimeChannel } from '@supabase/supabase-js';
+
+// import "@/components/ui/switch.css";
 
 const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ?!.,';
 const MAX_CHARS = 80;
 const CHARS_PER_LINE = 16;
 const NUM_LINES = 5;
+
+type Message = {
+  id: number;
+  content: string;
+  created_at: string;
+};
 
 const SplitFlapDisplay = () => {
   const [targetText, setTargetText] = useState('HELLO WORLD');
@@ -39,8 +53,16 @@ const SplitFlapDisplay = () => {
   const [newQueueMessage, setNewQueueMessage] = useState('');
 
   // Add new state near other state declarations
-  const [messageHistory, setMessageHistory] = useState<string[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const [isCentered, setIsCentered] = useState(true);
+  const [textAlignment, setTextAlignment] = useState<'center' | 'left'>('left');
+  const [verticalAlignment, setVerticalAlignment] = useState<'center' | 'top'>('top');
+
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   const animateToChar = (currentChar: string, targetChar: string) => {
     if (currentChar === targetChar) return currentChar;
@@ -106,18 +128,91 @@ const SplitFlapDisplay = () => {
     }
   }, [isPlaying, currentQueueIndex, messageQueue]);
 
+  // Add effect to load initial messages and set up realtime subscription
+  useEffect(() => {
+    // Fetch initial messages
+    const fetchMessages = async () => {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (data && !error) {
+        setMessages(data);
+      }
+      setIsLoading(false);
+    };
+
+    fetchMessages();
+
+    // Set up realtime subscription for both inserts and deletes
+    const channel = supabase
+      .channel('messages')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages'
+        },
+        (payload) => {
+          console.log('New message received:', payload);
+          const newMessage = payload.new as Message;
+          setMessages(current => [newMessage, ...current]);
+          displayMessage(newMessage.content);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'messages'
+        },
+        (payload) => {
+          console.log('Message deleted:', payload);
+          const deletedId = payload.old.id;
+          setMessages(current => current.filter(msg => msg.id !== deletedId));
+        }
+      )
+      .subscribe((status) => {
+        console.log('Subscription status:', status);
+      });
+
+    // Cleanup subscription
+    return () => {
+      channel.unsubscribe();
+    };
+  }, []);
+
   const displayMessage = (text: string) => {
     const trimmedText = text.slice(0, MAX_CHARS).padEnd(MAX_CHARS, ' ').toUpperCase();
     setTargetText(trimmedText);
     setIsAnimating(true);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!inputText.trim()) return;
-    displayMessage(inputText);
-    setMessageHistory(prev => [inputText, ...prev]);
-    setInputText('');
-    setHistoryIndex(-1);
+
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .insert([{ content: inputText }])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving message:', error);
+        return;
+      }
+
+      // Don't update local state here, let the subscription handle it
+      setInputText('');
+    } catch (error) {
+      console.error('Error in handleSubmit:', error);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -126,11 +221,11 @@ const SplitFlapDisplay = () => {
       handleSubmit();
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      if (messageHistory.length > 0) {
+      if (messages.length > 0) {
         const newIndex = historyIndex + 1;
-        if (newIndex < messageHistory.length) {
+        if (newIndex < messages.length) {
           setHistoryIndex(newIndex);
-          setInputText(messageHistory[newIndex]);
+          setInputText(messages[newIndex].content);
         }
       }
     } else if (e.key === 'ArrowDown') {
@@ -138,7 +233,7 @@ const SplitFlapDisplay = () => {
       if (historyIndex > -1) {
         const newIndex = historyIndex - 1;
         setHistoryIndex(newIndex);
-        setInputText(newIndex === -1 ? '' : messageHistory[newIndex]);
+        setInputText(newIndex === -1 ? '' : messages[newIndex].content);
       }
     }
   };
@@ -169,12 +264,17 @@ const SplitFlapDisplay = () => {
     const lines: string[] = Array(NUM_LINES).fill('');
     const textLines = text.split('\n');
     
-    const centerLine = (text: string): string => {
+    const formatLine = (text: string): string => {
       const truncatedText = text.slice(0, CHARS_PER_LINE);
-      const totalPadding = CHARS_PER_LINE - truncatedText.length;
-      const leftPadding = Math.floor(totalPadding / 2);
-      const rightPadding = totalPadding - leftPadding;
-      return ' '.repeat(leftPadding) + truncatedText + ' '.repeat(rightPadding);
+      
+      if (textAlignment === 'center') {
+        const totalPadding = CHARS_PER_LINE - truncatedText.length;
+        const leftPadding = Math.floor(totalPadding / 2);
+        const rightPadding = totalPadding - leftPadding;
+        return ' '.repeat(leftPadding) + truncatedText + ' '.repeat(rightPadding);
+      } else {
+        return truncatedText.padEnd(CHARS_PER_LINE, ' ');
+      }
     };
 
     // First, format all the lines without worrying about display position
@@ -183,7 +283,7 @@ const SplitFlapDisplay = () => {
     for (const textLine of textLines) {
       // Handle empty lines from shift+enter
       if (textLine.trim() === '') {
-        formattedLines.push(centerLine(''));
+        formattedLines.push(formatLine(''));
         continue;
       }
 
@@ -197,20 +297,20 @@ const SplitFlapDisplay = () => {
         if (potentialLine.length <= CHARS_PER_LINE) {
           currentLineWords.push(word);
           if (i === words.length - 1) {
-            formattedLines.push(centerLine(currentLineWords.join(' ')));
+            formattedLines.push(formatLine(currentLineWords.join(' ')));
           }
         } else {
           if (currentLineWords.length > 0) {
-            formattedLines.push(centerLine(currentLineWords.join(' ')));
+            formattedLines.push(formatLine(currentLineWords.join(' ')));
           }
           
           if (word.length <= CHARS_PER_LINE) {
             currentLineWords = [word];
             if (i === words.length - 1) {
-              formattedLines.push(centerLine(word));
+              formattedLines.push(formatLine(word));
             }
           } else {
-            formattedLines.push(centerLine(word.slice(0, CHARS_PER_LINE)));
+            formattedLines.push(formatLine(word.slice(0, CHARS_PER_LINE)));
             currentLineWords = [];
           }
         }
@@ -218,13 +318,14 @@ const SplitFlapDisplay = () => {
     }
 
     // Now position the formatted lines in the middle of the display area
-    const startingLine = Math.max(0, Math.floor((NUM_LINES - formattedLines.length) / 2));
+    const startingLine = verticalAlignment === 'center'
+      ? Math.max(0, Math.floor((NUM_LINES - formattedLines.length) / 2))
+      : 0;
     
     // Fill lines before content with spaces
     for (let i = 0; i < startingLine; i++) {
       lines[i] = ' '.repeat(CHARS_PER_LINE);
     }
-
     // Add the formatted content
     for (let i = 0; i < formattedLines.length && startingLine + i < NUM_LINES; i++) {
       lines[startingLine + i] = formattedLines[i];
@@ -240,6 +341,29 @@ const SplitFlapDisplay = () => {
 
   // Replace the displayLines calculation in the render section with:
   const displayLines = formatDisplayLines(displayText);
+
+  // Add the delete handler function
+  const handleDelete = async (id: number) => {
+    try {
+      setIsDeleting(true);
+      const { error } = await supabase
+        .from('messages')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error('Error deleting message:', error);
+        return;
+      }
+
+      // Update local state to remove the deleted message
+      setMessages(current => current.filter(msg => msg.id !== id));
+    } catch (error) {
+      console.error('Error in handleDelete:', error);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
@@ -276,24 +400,58 @@ const SplitFlapDisplay = () => {
             <Button 
               variant="ghost" 
               size="sm"
-              className="bg-slate-800/30 hover:bg-slate-700/30 backdrop-blur-sm"
+              className="opacity-60 hover:opacity-100 hover:bg-slate-800/30 hover:backdrop-blur-sm 
+                hover:border hover:border-slate-700/30 transition-all duration-200 
+                hover:text-blue-400 hover:shadow-lg hover:shadow-blue-900/20 border-transparent"
             >
-              <FontAwesomeIcon icon={faSliders} className="h-5 w-5" />
+              <FontAwesomeIcon icon={faSliders} className="h-4 w-4" />
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700
-            animate-fade-in
-            data-[state=open]:animate-in data-[state=closed]:animate-out
-            data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0
-            data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95
-            data-[state=closed]:slide-out-to-left-1/2 data-[state=open]:slide-in-from-left-1/2
-            data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-top-[48%]
-            duration-300 transition-all"
+            fixed bottom-24 left-12 translate-x-0 translate-y-0
+            animate-in fade-in-0 zoom-in-95 duration-150 ease-out
+            data-[state=closed]:animate-out data-[state=closed]:fade-out-0 
+            data-[state=closed]:zoom-out-95 data-[state=closed]:duration-150 
+            data-[state=closed]:ease-in-out"
           >
             <DialogHeader>
-              <DialogTitle>Message Queue</DialogTitle>
+              <DialogTitle>Display Settings</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
+              {/* Text Alignment Controls */}
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col space-y-1 mt-4">
+                  <Label htmlFor="horizontal-alignment" className="text-base">Center Horizontally</Label>
+                </div>
+                <Switch
+                  id="horizontal-alignment"
+                  checked={textAlignment === 'center'} 
+                  onCheckedChange={(checked) => 
+                    setTextAlignment(checked ? 'center' : 'left')
+                  }
+                  className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors 
+                    data-[state=checked]:bg-blue-800 data-[state=unchecked]:bg-slate-600"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col space-y-1">
+                  <Label htmlFor="vertical-alignment" className="text-base">Center Vertically</Label>
+                </div>
+                <Switch
+                  id="vertical-alignment"
+                  checked={verticalAlignment === 'center'}
+                  onCheckedChange={(checked) => 
+                    setVerticalAlignment(checked ? 'center' : 'top')
+                  }
+                  className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors 
+                    data-[state=checked]:bg-blue-800 data-[state=unchecked]:bg-slate-600"
+                />
+              </div>
+
+              <div className="border-t border-slate-700 my-4"></div>
+
+              {/* Queue Controls */}
               <div className="flex items-center space-x-2">
                 <Button
                   onClick={togglePlayback}
@@ -369,6 +527,71 @@ const SplitFlapDisplay = () => {
         </Dialog>
       </div>
 
+      {/* Add History Dialog - place next to existing settings dialog */}
+      <div className="fixed bottom-12 left-28">
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button 
+              variant="ghost" 
+              size="sm"
+              className="opacity-60 hover:opacity-100 hover:bg-slate-800/30 hover:backdrop-blur-sm 
+                hover:border hover:border-slate-700/30 transition-all duration-200 
+               hover:text-blue-400 hover:shadow-lg hover:shadow-blue-900/20 border-transparent"
+            >
+              <FontAwesomeIcon icon={faHistory} className="h-4 w-4" />
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700
+            fixed bottom-24 left-28 translate-x-0 translate-y-0
+            animate-in fade-in-0 zoom-in-95 duration-150 ease-out
+            data-[state=closed]:animate-out data-[state=closed]:fade-out-0 
+            data-[state=closed]:zoom-out-95 data-[state=closed]:duration-150 
+            data-[state=closed]:ease-in-out"
+          >
+            <DialogHeader>
+              <DialogTitle>Message History</DialogTitle>
+            </DialogHeader>
+            <ScrollArea className="h-[400px]">
+              {isLoading ? (
+                <div className="flex items-center justify-center h-20 text-slate-500">
+                  Loading messages...
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="flex items-center justify-center h-20 text-slate-500">
+                  No messages yet
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className="group flex items-center justify-between p-3 rounded bg-slate-800/30 hover:bg-slate-800/50"
+                    >
+                      <div className="flex-1 mr-4">
+                        <p className="text-sm text-white">{message.content}</p>
+                        <p className="text-xs text-slate-500">
+                          {new Date(message.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          onClick={() => handleDelete(message.id)}
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 hover:bg-slate-700/30 hover:text-red-400 transition-colors duration-200"
+                        >
+                          <FontAwesomeIcon icon={faTrash} className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
+      </div>
+
       {/* Message Input */}
       <div className="fixed bottom-12 left-1/2 -translate-x-1/2">
         <div className="relative w-80">
@@ -420,3 +643,4 @@ const SplitFlapDisplay = () => {
 };
 
 export default SplitFlapDisplay;
+

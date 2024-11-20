@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss"
+import animate from "tailwindcss-animate"
 
 const config = {
   darkMode: ["class"],
@@ -16,17 +17,18 @@ const config = {
           "100%": { opacity: "1" },
         },
         "zoom-in": {
-          "0%": { transform: "scale(95%)" },
+          "0%": { transform: "scale(97%)" },
+          "102%": { transform: "scale(102%)" },
           "100%": { transform: "scale(100%)" },
         },
       },
       animation: {
-        "fade-in": "fade-in 300ms ease-out",
-        "zoom-in": "zoom-in 300ms ease-out",
+        "fade-in": "fade-in 100ms ease-out",
+        "zoom-in": "zoom-in 100ms ease-out",
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [animate],
 } satisfies Config
 
 export default config
