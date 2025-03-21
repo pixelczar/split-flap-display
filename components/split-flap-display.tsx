@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
@@ -24,6 +25,7 @@ import { Switch } from "./ui/switch"
 import { Label } from "@/components/ui/label"
 import { supabase } from '@/lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { rickRubinQuotes } from '../quotes/rick-rubin';
 
 // import "@/components/ui/switch.css";
 
@@ -63,6 +65,9 @@ const SplitFlapDisplay = () => {
 
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  const [autoQuoteEnabled, setAutoQuoteEnabled] = useState(false);
+  const [quoteInterval, setQuoteInterval] = useState(15); // minutes
 
   const animateToChar = (currentChar: string, targetChar: string) => {
     if (currentChar === targetChar) return currentChar;
@@ -365,6 +370,25 @@ const SplitFlapDisplay = () => {
     }
   };
 
+  // Add this effect to handle the automatic quotes
+  useEffect(() => {
+    if (!autoQuoteEnabled) return;
+    
+    const displayRandomQuote = () => {
+      const randomIndex = Math.floor(Math.random() * rickRubinQuotes.length);
+      const quote = rickRubinQuotes[randomIndex];
+      displayMessage(quote);
+    };
+
+    // Display first quote immediately
+    displayRandomQuote();
+    
+    // Set up interval
+    const intervalId = setInterval(displayRandomQuote, quoteInterval * 60 * 1000);
+    
+    return () => clearInterval(intervalId);
+  }, [autoQuoteEnabled, quoteInterval]);
+
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
       <div className="flex-grow flex items-center">
@@ -401,21 +425,18 @@ const SplitFlapDisplay = () => {
               variant="ghost" 
               size="sm"
               className="opacity-60 hover:opacity-100 hover:bg-slate-800/30 hover:backdrop-blur-sm 
-                hover:border hover:border-slate-700/30 transition-all duration-200 
+                border hover:border-slate-700/30 transition-all duration-200 
                 hover:text-blue-400 hover:shadow-lg hover:shadow-blue-900/20 border-transparent"
             >
               <FontAwesomeIcon icon={faSliders} className="h-4 w-4" />
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700
-            fixed bottom-24 left-12 translate-x-0 translate-y-0
-            animate-in fade-in-0 zoom-in-95 duration-150 ease-out
-            data-[state=closed]:animate-out data-[state=closed]:fade-out-0 
-            data-[state=closed]:zoom-out-95 data-[state=closed]:duration-150 
-            data-[state=closed]:ease-in-out"
-          >
+          <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700">
             <DialogHeader>
               <DialogTitle>Display Settings</DialogTitle>
+              <DialogDescription>
+                Configure your split-flap display settings and automatic quotes.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               {/* Text Alignment Controls */}
@@ -522,6 +543,47 @@ const SplitFlapDisplay = () => {
                   ))}
                 </div>
               </ScrollArea>
+
+              <div className="space-y-6 py-4">
+                <div className="flex items-center justify-between space-x-4 rounded-lg border border-slate-800 p-4 bg-slate-900/50">
+                  <div className="space-y-0.5">
+                    <Label 
+                      htmlFor="auto-quote" 
+                      className="text-sm font-medium text-slate-200"
+                    >
+                      Auto Display Quotes
+                    </Label>
+                    <p className="text-xs text-slate-400">
+                      Display random Rick Rubin quotes periodically
+                    </p>
+                  </div>
+                  <Switch
+                    id="auto-quote"
+                    checked={autoQuoteEnabled}
+                    onCheckedChange={setAutoQuoteEnabled}
+                    className="data-[state=checked]:bg-blue-600 data-[state=unchecked]:bg-slate-700"
+                  />
+                </div>
+                
+                {autoQuoteEnabled && (
+                  <div className="flex items-center gap-4 rounded-lg border border-slate-800 p-4 bg-slate-900/50">
+                    <Label 
+                      htmlFor="quote-interval" 
+                      className="text-sm font-medium text-slate-200"
+                    >
+                      Interval (minutes)
+                    </Label>
+                    <Input
+                      id="quote-interval"
+                      type="number"
+                      min="1"
+                      value={quoteInterval}
+                      onChange={(e) => setQuoteInterval(Number(e.target.value))}
+                      className="w-24 bg-slate-800 border-slate-700 text-slate-200"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           </DialogContent>
         </Dialog>
@@ -535,7 +597,7 @@ const SplitFlapDisplay = () => {
               variant="ghost" 
               size="sm"
               className="opacity-60 hover:opacity-100 hover:bg-slate-800/30 hover:backdrop-blur-sm 
-                hover:border hover:border-slate-700/30 transition-all duration-200 
+                 hover:border-slate-700/30 transition-all duration-200 
                hover:text-blue-400 hover:shadow-lg hover:shadow-blue-900/20 border-transparent"
             >
               <FontAwesomeIcon icon={faHistory} className="h-4 w-4" />
