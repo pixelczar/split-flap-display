@@ -383,10 +383,9 @@ const SplitFlapDisplay = () => {
     // Display first quote immediately
     displayRandomQuote();
     
-    // Set up interval
-    const intervalId = setInterval(displayRandomQuote, quoteInterval * 60 * 1000);
+    const timer = window.setInterval(displayRandomQuote, quoteInterval * 60 * 1000);
     
-    return () => clearInterval(intervalId);
+    return () => window.clearInterval(timer);
   }, [autoQuoteEnabled, quoteInterval]);
 
   return (
