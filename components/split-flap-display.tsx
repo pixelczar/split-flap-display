@@ -30,7 +30,7 @@ import { rickRubinQuotes } from '../quotes/rick-rubin';
 // import "@/components/ui/switch.css";
 
 const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ?!.,';
-const MAX_CHARS = 80;
+const MAX_CHARS = 64;
 const CHARS_PER_LINE = 16;
 const NUM_LINES = 5;
 
@@ -66,7 +66,7 @@ const SplitFlapDisplay = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  const [autoQuoteEnabled, setAutoQuoteEnabled] = useState(false);
+  const [autoQuoteEnabled, setAutoQuoteEnabled] = useState(true);
   const [quoteInterval, setQuoteInterval] = useState(15); // minutes
 
   const animateToChar = (currentChar: string, targetChar: string) => {
@@ -391,20 +391,27 @@ const SplitFlapDisplay = () => {
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
       <div className="flex-grow flex items-center">
-        <div className="bg-slate-900/50 p-12 rounded-lg backdrop-blur-sm">
-          <div className="font-mono text-3xl space-y-3">
+        <div className="bg-slate-800/40 p-12 rounded-lg backdrop-blur-sm">
+          <div className="font-mono text-4xl space-y-3">
             {displayLines.map((line, lineIndex) => (
               <div key={lineIndex} className="flex justify-center">
                 {line.split('').map((char, charIndex) => (
                   <span
                     key={charIndex}
-                    className="inline-flex items-center justify-center w-12 h-16 bg-slate-800/80 mx-1 rounded transition-all duration-300 border border-slate-700/30"
+                    className="inline-flex items-center justify-center w-16 h-20 font-medium bg-slate-950/60 mx-1 rounded-md transition-all duration-300 border border-slate-700/40 relative overflow-hidden"
                     style={{
                       transform: isAnimating ? 'rotateX(10deg)' : 'none',
                       textShadow: '0 0 5px rgba(255,255,255,0.3)',
                       boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
                     }}
                   >
+                    {/* Split-flap divider line */}
+                    <div className="absolute w-full h-[1px] bg-slate-600/50 top-1/2 transform -translate-y-1/2 z-10 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"></div>
+                    {/* Top flap shadow */}
+                    <div className="absolute w-full h-[3px] bg-gradient-to-b from-transparent to-black/20 bottom-1/2 z-5"></div>
+                    {/* Bottom flap highlight */}
+                    <div className="absolute w-full h-[2px] bg-gradient-to-b from-white/10 to-transparent top-1/2 z-5"></div>
+                    
                     <span className={char === ' ' ? 'text-slate-700' : 'text-white'}>
                       {char === ' ' ? '•' : char}
                     </span>
@@ -657,8 +664,8 @@ const SplitFlapDisplay = () => {
       <div className="fixed bottom-12 left-1/2 -translate-x-1/2">
         <div className="relative w-80">
           <div 
-            className={`relative bg-slate-800/30 rounded-xl shadow-lg backdrop-blur-sm overflow-hidden transition-all
-              ${isFocused ? 'ring-2 ring-blue-500/30 ring-offset-2 ring-offset-slate-950' : 'ring-1 ring-slate-700/30'}`}
+            className={`relative bg-slate-800/60 rounded-xl shadow-lg backdrop-blur-sm overflow-hidden transition-all
+              ${isFocused ? 'ring-2 ring-blue-500/70 ring-offset-2 ring-offset-slate-950' : 'ring-1 ring-slate-600/60'}`}
           >
             <textarea
               value={inputText}
@@ -668,7 +675,7 @@ const SplitFlapDisplay = () => {
               onBlur={() => setIsFocused(false)}
               placeholder="Type your message..."
               maxLength={MAX_CHARS}
-              className="w-full bg-transparent border-0 resize-none text-white placeholder:text-slate-700 focus:ring-0 focus:outline-none pr-12 p-3 h-[70px] overflow-hidden"
+              className="w-full bg-transparent border-0 resize-none text-white placeholder:text-slate-400 focus:ring-0 focus:outline-none pr-12 p-3 h-[70px] overflow-hidden"
               style={{ 
                 WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 85%, transparent 100%)'
               }}
@@ -678,21 +685,21 @@ const SplitFlapDisplay = () => {
               variant="ghost"
               disabled={!inputText.trim()}
               className="absolute right-2 top-8 h-8 w-8 -translate-y-[22px] transition-all
-                       bg-transparent hover:bg-blue-500/10 disabled:hover:bg-transparent
-                       group disabled:opacity-40 disabled:cursor-not-allowed
-                       data-[eligible=true]:bg-blue-500/10 text-slate-400 data-[eligible=true]:text-blue-400"
+                       bg-transparent hover:bg-blue-500/30 disabled:hover:bg-transparent
+                       group disabled:opacity-40 disabled:cursor-not-allowed rounded-xl
+                       data-[eligible=true]:bg-blue-500/30 text-slate-300 data-[eligible=true]:text-blue-300"
               data-eligible={!!inputText.trim()}
             >
               <FontAwesomeIcon icon={faArrowCircleUp} className="h-5 w-5 transition-colors duration-200 
-                                      data-[eligible=true]:text-blue-400
-                                      group-hover:text-blue-200 group-disabled:group-hover:text-slate-400 group-disabled:cursor-not-allowed" />
+                                      data-[eligible=true]:text-blue-300
+                                      group-hover:text-blue-100 group-disabled:group-hover:text-slate-400 group-disabled:cursor-not-allowed" />
             </Button>
-            <div className="h-1 bg-slate-700/50 mt-0.5">
+            <div className="h-2 bg-slate-800 mt-0.5">
               <div 
                 className="h-full transition-all duration-200 ease-in-out rounded-none"
                 style={{ 
                   width: `${(inputText.length / MAX_CHARS) * 100}%`,
-                  backgroundColor: inputText.length === MAX_CHARS ? '#dc2626' : '#3b82f666'
+                  backgroundColor: inputText.length === MAX_CHARS ? '#ef4444' : '#3b82f6'
                 }}
               />
             </div>
