@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from './ui/button';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
@@ -26,13 +26,17 @@ import { Label } from "@/components/ui/label"
 import { supabase } from '@/lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { rickRubinQuotes } from '../quotes/rick-rubin';
+import { ThemeToggle } from './theme-toggle';
 
 // import "@/components/ui/switch.css";
 
 const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ?!.,';
-const MAX_CHARS = 64;
+const MAX_CHARS = 80;
 const CHARS_PER_LINE = 16;
 const NUM_LINES = 5;
+const ANIMATION_SPEED = 650; // Increased to match the CSS animation duration
+const SEQUENTIAL_DELAY = 80; // Increased for better visual flow with slower animations
+const FLIPS_PER_CHAR = 2; // Reduced - fewer intermediate characters for smoother animation
 
 type Message = {
   id: number;
@@ -68,7 +72,12 @@ const SplitFlapDisplay = () => {
 
   const [autoQuoteEnabled, setAutoQuoteEnabled] = useState(true);
   const [quoteInterval, setQuoteInterval] = useState(15); // minutes
-
+  
+  // Add states for animation enhancements
+  const [animatingChars, setAnimatingChars] = useState<{[key: string]: boolean}>({});
+  const [charSequences, setCharSequences] = useState<{[key: string]: string[]}>({});
+  const [charIndexKey, setCharIndexKey] = useState<{[key: string]: number}>({});
+  
   const animateToChar = (currentChar: string, targetChar: string) => {
     if (currentChar === targetChar) return currentChar;
     
@@ -92,20 +101,114 @@ const SplitFlapDisplay = () => {
     return CHARS[nextIndex];
   };
 
+  const generateCharSequence = (startChar: string, endChar: string): string[] => {
+    const sequence: string[] = [];
+    
+    // Starting point in the character set
+    let currentIndex = CHARS.indexOf(startChar.toUpperCase());
+    if (currentIndex === -1) currentIndex = 0;
+    
+    // Target point in the character set
+    const targetIndex = CHARS.indexOf(endChar.toUpperCase());
+    if (targetIndex === -1) return [endChar]; // Can't animate if we don't know the target
+    
+    // Calculate distance between characters
+    let distance = targetIndex - currentIndex;
+    
+    // Find shortest path (clockwise or counterclockwise)
+    if (Math.abs(distance) > CHARS.length / 2) {
+      distance = distance > 0 
+        ? distance - CHARS.length 
+        : distance + CHARS.length;
+    }
+    
+    // Start with current character
+    sequence.push(startChar.toUpperCase());
+    
+    // Just choose 1-2 intermediate characters for a cleaner look
+    // This gives enough visual change without looking too chaotic
+    if (FLIPS_PER_CHAR > 0) {
+      const midIndex = Math.round(currentIndex + distance * 0.5);
+      const adjustedMidIndex = ((midIndex % CHARS.length) + CHARS.length) % CHARS.length;
+      sequence.push(CHARS[adjustedMidIndex]);
+    }
+    
+    // End with the target character
+    sequence.push(endChar.toUpperCase());
+    
+    return sequence;
+  };
+
   const updateText = useCallback(() => {
     let needsUpdate = false;
-    const newText = displayText.split('').map((char, i) => {
-      const targetChar = i < targetText.length ? targetText[i] : ' ';
-      if (char !== targetChar) {
-        needsUpdate = true;
-        return animateToChar(char, targetChar);
-      }
-      return char;
-    }).join('');
+    const newAnimatingChars = { ...animatingChars };
+    const newDisplayText = displayText.split('');
     
-    setDisplayText(newText);
-
-    if (!needsUpdate) {
+    for (let i = 0; i < targetText.length; i++) {
+      const charKey = `${Math.floor(i / CHARS_PER_LINE)}-${i % CHARS_PER_LINE}`;
+      const currentChar = i < displayText.length ? displayText[i] : ' ';
+      const targetChar = targetText[i];
+      
+      if (currentChar !== targetChar) {
+        needsUpdate = true;
+        
+        // Start animation for this character if not already animating
+        if (!animatingChars[charKey]) {
+          newAnimatingChars[charKey] = true;
+          // Generate sequence for this character
+          const sequence = generateCharSequence(currentChar, targetChar);
+          setCharSequences(prev => ({...prev, [charKey]: sequence}));
+          setCharIndexKey(prev => ({...prev, [charKey]: 0}));
+          
+          // Schedule this character to start animating after a delay based on position
+          const charDelay = (i % CHARS_PER_LINE) * SEQUENTIAL_DELAY + 
+                          Math.floor(i / CHARS_PER_LINE) * SEQUENTIAL_DELAY * 2;
+          
+          // Start with the first intermediate character immediately
+          if (sequence.length > 1) {
+            newDisplayText[i] = sequence[0];
+          }
+          
+          // Schedule animation to start
+          setTimeout(() => {
+            // Apply the CSS animation class
+            const updatedAnimations = { ...animatingChars };
+            updatedAnimations[charKey] = true;
+            setAnimatingChars(updatedAnimations);
+            
+            // Schedule character to update halfway through the animation
+            setTimeout(() => {
+              setDisplayText(current => {
+                const updated = current.split('');
+                const sequence = charSequences[charKey] || [];
+                if (sequence.length > 1) {
+                  updated[i] = sequence[1]; // Show middle character during animation
+                }
+                return updated.join('');
+              });
+            }, ANIMATION_SPEED * 0.5);
+            
+            // Schedule animation to complete
+            setTimeout(() => {
+              setDisplayText(current => {
+                const updated = current.split('');
+                updated[i] = targetChar; // Final character
+                return updated.join('');
+              });
+              
+              setAnimatingChars(prev => {
+                const updated = { ...prev };
+                updated[charKey] = false;
+                return updated;
+              });
+            }, ANIMATION_SPEED);
+          }, charDelay);
+        }
+      }
+    }
+    
+    // Check if all animations are complete
+    if (!Object.values(newAnimatingChars).some(Boolean)) {
       setIsAnimating(false);
       if (isPlaying && currentQueueIndex < messageQueue.length - 1) {
         setTimeout(() => {
@@ -113,15 +216,16 @@ const SplitFlapDisplay = () => {
         }, interval - 3000);
       }
     }
-  }, [displayText, targetText, isPlaying, currentQueueIndex, messageQueue.length, interval]);
+  }, [displayText, targetText, isPlaying, currentQueueIndex, messageQueue.length, interval, 
+      animatingChars, charSequences, charIndexKey]);
 
   useEffect(() => {
     let timer: number;
     if (isAnimating) {
-      timer = window.setInterval(updateText, 50);
+      timer = window.setInterval(updateText, ANIMATION_SPEED);
     }
     return () => window.clearInterval(timer);
-  }, [isAnimating, displayText, targetText, isPlaying, currentQueueIndex, messageQueue, interval, updateText]);
+  }, [isAnimating, updateText]);
 
   // Effect for auto-playing queue
   useEffect(() => {
@@ -196,6 +300,7 @@ const SplitFlapDisplay = () => {
     const trimmedText = text.slice(0, MAX_CHARS).padEnd(MAX_CHARS, ' ').toUpperCase();
     setTargetText(trimmedText);
     setIsAnimating(true);
+    setAnimatingChars({}); // Reset animating state for new message
   };
 
   const handleSubmit = async () => {
@@ -390,41 +495,12 @@ const SplitFlapDisplay = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
-      <div className="flex-grow flex items-center">
-        <div className="bg-slate-800/40 p-12 rounded-lg backdrop-blur-sm">
-          <div className="font-mono text-4xl space-y-3">
-            {displayLines.map((line, lineIndex) => (
-              <div key={lineIndex} className="flex justify-center">
-                {line.split('').map((char, charIndex) => (
-                  <span
-                    key={charIndex}
-                    className="inline-flex items-center justify-center w-16 h-20 font-medium bg-slate-950/60 mx-1 rounded-md transition-all duration-300 border border-slate-700/40 relative overflow-hidden"
-                    style={{
-                      transform: isAnimating ? 'rotateX(10deg)' : 'none',
-                      textShadow: '0 0 5px rgba(255,255,255,0.3)',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                    }}
-                  >
-                    {/* Split-flap divider line */}
-                    <div className="absolute w-full h-[1px] bg-slate-600/50 top-1/2 transform -translate-y-1/2 z-10 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"></div>
-                    {/* Top flap shadow */}
-                    <div className="absolute w-full h-[3px] bg-gradient-to-b from-transparent to-black/20 bottom-1/2 z-5"></div>
-                    {/* Bottom flap highlight */}
-                    <div className="absolute w-full h-[2px] bg-gradient-to-b from-white/10 to-transparent top-1/2 z-5"></div>
-                    
-                    <span className={char === ' ' ? 'text-slate-700' : 'text-white'}>
-                      {char === ' ' ? '•' : char}
-                    </span>
-                  </span>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-      
-      {/* Queue Control Dialog */}
-      <div className="fixed bottom-12 left-12">
+      {/* Top right buttons */}
+      <div className="fixed top-8 right-8 flex items-center space-x-3">
+        {/* Theme Toggle Button */}
+        {/* <ThemeToggle /> */}
+        
+        {/* Settings Button */}
         <Dialog>
           <DialogTrigger asChild>
             <Button 
@@ -437,7 +513,13 @@ const SplitFlapDisplay = () => {
               <FontAwesomeIcon icon={faSliders} className="h-4 w-4" />
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700">
+          <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700
+            fixed top-24 right-8 translate-x-0 translate-y-0
+            animate-in fade-in-0 zoom-in-95 duration-150 ease-out
+            data-[state=closed]:animate-out data-[state=closed]:fade-out-0 
+            data-[state=closed]:zoom-out-95 data-[state=closed]:duration-150 
+            data-[state=closed]:ease-in-out"
+          >
             <DialogHeader>
               <DialogTitle>Display Settings</DialogTitle>
               <DialogDescription>
@@ -593,24 +675,22 @@ const SplitFlapDisplay = () => {
             </div>
           </DialogContent>
         </Dialog>
-      </div>
 
-      {/* Add History Dialog - place next to existing settings dialog */}
-      <div className="fixed bottom-12 left-28">
+        {/* History Button */}
         <Dialog>
           <DialogTrigger asChild>
             <Button 
               variant="ghost" 
               size="sm"
               className="opacity-60 hover:opacity-100 hover:bg-slate-800/30 hover:backdrop-blur-sm 
-                 hover:border-slate-700/30 transition-all duration-200 
-               hover:text-blue-400 hover:shadow-lg hover:shadow-blue-900/20 border-transparent"
+                hover:border-slate-700/30 transition-all duration-200 
+                hover:text-blue-400 hover:shadow-lg hover:shadow-blue-900/20 border-transparent"
             >
               <FontAwesomeIcon icon={faHistory} className="h-4 w-4" />
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700
-            fixed bottom-24 left-28 translate-x-0 translate-y-0
+            fixed top-24 right-8 translate-x-0 translate-y-0
             animate-in fade-in-0 zoom-in-95 duration-150 ease-out
             data-[state=closed]:animate-out data-[state=closed]:fade-out-0 
             data-[state=closed]:zoom-out-95 data-[state=closed]:duration-150 
@@ -658,6 +738,66 @@ const SplitFlapDisplay = () => {
             </ScrollArea>
           </DialogContent>
         </Dialog>
+      </div>
+
+      <div className="flex-grow flex items-center">
+        <div className="bg-slate-900/50 p-12 rounded-lg backdrop-blur-sm">
+          <div className="font-mono text-3xl space-y-3">
+            {displayLines.map((line, lineIndex) => (
+              <div key={lineIndex} className="flex justify-center">
+                {line.split('').map((char, charIndex) => {
+                  const charKey = `${lineIndex}-${charIndex}`;
+                  const isAnimating = animatingChars[charKey];
+                  
+                  // Fallback container if the animation container fails
+                  return (
+                    <div
+                      key={charIndex}
+                      className="relative w-12 mx-1 h-16 bg-slate-800/40 rounded"
+                      style={{ perspective: '1000px' }}
+                    >
+                      <div
+                        className={`
+                          absolute inset-0 w-full h-full text-center flex items-center justify-center
+                          transition-transform duration-300 ease-in-out
+                          ${isAnimating ? 'animate-flip-down' : ''}
+                        `}
+                        style={{
+                          transformOrigin: 'center center',
+                          transformStyle: 'preserve-3d',
+                          backfaceVisibility: 'hidden',
+                        }}
+                      >
+                        <span
+                          className="flex items-center justify-center w-full h-full bg-slate-800/80 rounded transition-all border border-slate-700/30 relative overflow-hidden"
+                          style={{
+                            textShadow: '0 0 5px rgba(255,255,255,0.3)',
+                            boxShadow: isAnimating ? 
+                              '0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3)' : 
+                              '0 1px 2px rgba(0,0,0,0.1)'
+                          }}
+                        >
+                          {/* Split-flap divider line */}
+                          <div className="absolute w-full h-[1px] bg-slate-600/80 top-1/2 transform -translate-y-1/2 z-10 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"></div>
+                          {/* Top flap shadow */}
+                          <div className={`absolute w-full h-[3px] bg-gradient-to-b from-transparent to-black/20 bottom-1/2 z-5 
+                            ${isAnimating ? 'opacity-60' : 'opacity-40'}`}></div>
+                          {/* Bottom flap highlight */}
+                          <div className={`absolute w-full h-[2px] bg-gradient-to-b from-white/10 to-transparent top-1/2 z-5
+                            ${isAnimating ? 'opacity-80' : 'opacity-20'}`}></div>
+                          
+                          <span className={char === ' ' ? 'text-slate-700' : 'text-white'}>
+                            {char === ' ' ? '•' : char}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Message Input */}

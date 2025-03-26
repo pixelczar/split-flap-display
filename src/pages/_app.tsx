@@ -1,6 +1,7 @@
 import "../styles/globals.css";
 import type { AppProps } from "next/app";
 import { ErrorBoundary, FallbackProps } from 'react-error-boundary';
+import { ThemeProvider } from '@/components/theme-provider'
 
 function ErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
   return (
@@ -21,8 +22,10 @@ function ErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
 
 export default function App({ Component, pageProps }: AppProps) {
   return (
-    <ErrorBoundary FallbackComponent={ErrorFallback}>
-      <Component {...pageProps} />
-    </ErrorBoundary>
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+      <ErrorBoundary FallbackComponent={ErrorFallback}>
+        <Component {...pageProps} />
+      </ErrorBoundary>
+    </ThemeProvider>
   );
 }
