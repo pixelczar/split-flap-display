@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label"
 import { supabase } from '@/lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { rickRubinQuotes } from '../quotes/rick-rubin';
-import { ThemeToggle } from './theme-toggle';
+// import { ThemeToggle } from './theme-toggle';
 
 // import "@/components/ui/switch.css";
 
