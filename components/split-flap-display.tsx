@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label"
 import { supabase } from '@/lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { rickRubinQuotes } from '../quotes/rick-rubin';
-// import { ThemeToggle } from './theme-toggle';
+import { ThemeToggle } from './theme-toggle';
 
 // import "@/components/ui/switch.css";
 
@@ -498,7 +498,7 @@ const SplitFlapDisplay = () => {
       {/* Top right buttons */}
       <div className="fixed top-8 right-8 flex items-center space-x-3">
         {/* Theme Toggle Button */}
-        {/* <ThemeToggle /> */}
+        <ThemeToggle />
         
         {/* Settings Button */}
         <Dialog>
