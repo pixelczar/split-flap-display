@@ -24,9 +24,9 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Switch } from "./ui/switch"
 import { Label } from "@/components/ui/label"
 import { supabase } from '@/lib/supabase';
-import { RealtimeChannel } from '@supabase/supabase-js';
 import { rickRubinQuotes } from '../quotes/rick-rubin';
-import { ThemeToggle } from './theme-toggle';
+import { SplitFlapChar } from './split-flap-char';
+// import { ThemeToggle } from './theme-toggle';
 
 // import "@/components/ui/switch.css";
 
@@ -34,9 +34,8 @@ const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ?!.,';
 const MAX_CHARS = 80;
 const CHARS_PER_LINE = 16;
 const NUM_LINES = 5;
-const ANIMATION_SPEED = 650; // Increased to match the CSS animation duration
-const SEQUENTIAL_DELAY = 80; // Increased for better visual flow with slower animations
-const FLIPS_PER_CHAR = 2; // Reduced - fewer intermediate characters for smoother animation
+const ANIMATION_SPEED = 70; // Base flip speed (CSS animation duration)
+const SEQUENTIAL_DELAY = 50; // Initial wave delay
 
 type Message = {
   id: number;
@@ -44,9 +43,54 @@ type Message = {
   created_at: string;
 };
 
+const generateCharSequence = (startChar: string, endChar: string): string[] => {
+  const sequence: string[] = [];
+  
+  // Starting point in the character set
+  let currentIndex = CHARS.indexOf(startChar.toUpperCase());
+  if (currentIndex === -1) currentIndex = 0;
+  
+  // Target point in the character set
+  const targetIndex = CHARS.indexOf(endChar.toUpperCase());
+  if (targetIndex === -1) return [endChar]; // Can't animate if we don't know the target
+  
+  // If same character, no animation needed
+  if (currentIndex === targetIndex) return [endChar.toUpperCase()];
+  
+  // Calculate distance between characters
+  let distance = targetIndex - currentIndex;
+  
+  // Find shortest path (clockwise or counterclockwise)
+  if (Math.abs(distance) > CHARS.length / 2) {
+    distance = distance > 0 
+      ? distance - CHARS.length 
+      : distance + CHARS.length;
+  }
+  
+  // Generate sequence with ALL characters in the path (like a continuous wheel)
+  // This creates the realistic split-flap effect where you see characters ticking through
+  const absDistance = Math.abs(distance);
+  const direction = Math.sign(distance);
+  
+  // Start with current character
+  sequence.push(startChar.toUpperCase());
+  
+  // Add ALL intermediate characters in the path
+  for (let i = 1; i < absDistance; i++) {
+    const stepIndex = currentIndex + (direction * i);
+    const adjustedIndex = ((stepIndex % CHARS.length) + CHARS.length) % CHARS.length;
+    sequence.push(CHARS[adjustedIndex]);
+  }
+  
+  // End with the target character
+  sequence.push(endChar.toUpperCase());
+  
+  return sequence;
+};
+
 const SplitFlapDisplay = () => {
-  const [targetText, setTargetText] = useState('HELLO WORLD');
-  const [displayText, setDisplayText] = useState(' '.repeat(MAX_CHARS));
+  const [targetLines, setTargetLines] = useState<string[]>(Array(NUM_LINES).fill(' '.repeat(CHARS_PER_LINE)));
+  const [displayLines, setDisplayLines] = useState<string[]>(Array(NUM_LINES).fill(' '.repeat(CHARS_PER_LINE)));
   const [inputText, setInputText] = useState('');
   const [isAnimating, setIsAnimating] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
@@ -62,315 +106,191 @@ const SplitFlapDisplay = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
 
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
-  const [isCentered, setIsCentered] = useState(true);
   const [textAlignment, setTextAlignment] = useState<'center' | 'left'>('left');
   const [verticalAlignment, setVerticalAlignment] = useState<'center' | 'top'>('top');
 
-  const [isDeleting, setIsDeleting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const [autoQuoteEnabled, setAutoQuoteEnabled] = useState(true);
   const [quoteInterval, setQuoteInterval] = useState(15); // minutes
   
+  // Auto-hide icons after mouse inactivity
+  const [iconsVisible, setIconsVisible] = useState(true);
+  const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const INACTIVITY_DELAY = 3000; // 3 seconds of inactivity before hiding
+  
   // Add states for animation enhancements
-  const [animatingChars, setAnimatingChars] = useState<{[key: string]: boolean}>({});
+  const [animatingChars, setAnimatingChars] = useState<{[key: string]: boolean}>({}); // Tracks if a sequence is active
+  const [flippingChars, setFlippingChars] = useState<{[key: string]: boolean}>({}); // Tracks if the visual flip is happening
   const [charSequences, setCharSequences] = useState<{[key: string]: string[]}>({});
   const [charIndexKey, setCharIndexKey] = useState<{[key: string]: number}>({});
   
-  const animateToChar = (currentChar: string, targetChar: string) => {
-    if (currentChar === targetChar) return currentChar;
+  // Refs to track active animations and timeouts
+  const activeAnimationsRef = useRef<{[key: string]: NodeJS.Timeout}>({});
+  
+  // Function to animate a single character through its sequence
+  const animateCharacter = useCallback((lineIndex: number, colIndex: number, startChar: string, endChar: string) => {
+    const charKey = `${lineIndex}-${colIndex}`;
     
-    const currentIndex = CHARS.indexOf(currentChar.toUpperCase());
-    const targetIndex = CHARS.indexOf(targetChar.toUpperCase());
-    
-    // Handle invalid characters by returning the target directly
-    if (currentIndex === -1 || targetIndex === -1) return targetChar;
-    
-    // Calculate the shortest path to the target character
-    let distance = targetIndex - currentIndex;
-    if (Math.abs(distance) > CHARS.length / 2) {
-      // If the distance is more than half the alphabet, go the other way
-      distance = distance > 0 
-        ? distance - CHARS.length 
-        : distance + CHARS.length;
+    // Clear any existing animation for this character
+    if (activeAnimationsRef.current[charKey]) {
+      clearTimeout(activeAnimationsRef.current[charKey]);
+      delete activeAnimationsRef.current[charKey];
     }
-    
-    // Move one step in the correct direction
-    const nextIndex = ((currentIndex + Math.sign(distance)) + CHARS.length) % CHARS.length;
-    return CHARS[nextIndex];
-  };
 
-  const generateCharSequence = (startChar: string, endChar: string): string[] => {
-    const sequence: string[] = [];
+    const sequence = generateCharSequence(startChar, endChar);
     
-    // Starting point in the character set
-    let currentIndex = CHARS.indexOf(startChar.toUpperCase());
-    if (currentIndex === -1) currentIndex = 0;
-    
-    // Target point in the character set
-    const targetIndex = CHARS.indexOf(endChar.toUpperCase());
-    if (targetIndex === -1) return [endChar]; // Can't animate if we don't know the target
-    
-    // Calculate distance between characters
-    let distance = targetIndex - currentIndex;
-    
-    // Find shortest path (clockwise or counterclockwise)
-    if (Math.abs(distance) > CHARS.length / 2) {
-      distance = distance > 0 
-        ? distance - CHARS.length 
-        : distance + CHARS.length;
-    }
-    
-    // Start with current character
-    sequence.push(startChar.toUpperCase());
-    
-    // Just choose 1-2 intermediate characters for a cleaner look
-    // This gives enough visual change without looking too chaotic
-    if (FLIPS_PER_CHAR > 0) {
-      const midIndex = Math.round(currentIndex + distance * 0.5);
-      const adjustedMidIndex = ((midIndex % CHARS.length) + CHARS.length) % CHARS.length;
-      sequence.push(CHARS[adjustedMidIndex]);
-    }
-    
-    // End with the target character
-    sequence.push(endChar.toUpperCase());
-    
-    return sequence;
-  };
-
-  const updateText = useCallback(() => {
-    let needsUpdate = false;
-    const newAnimatingChars = { ...animatingChars };
-    const newDisplayText = displayText.split('');
-    
-    for (let i = 0; i < targetText.length; i++) {
-      const charKey = `${Math.floor(i / CHARS_PER_LINE)}-${i % CHARS_PER_LINE}`;
-      const currentChar = i < displayText.length ? displayText[i] : ' ';
-      const targetChar = targetText[i];
-      
-      if (currentChar !== targetChar) {
-        needsUpdate = true;
-        
-        // Start animation for this character if not already animating
-        if (!animatingChars[charKey]) {
-          newAnimatingChars[charKey] = true;
-          // Generate sequence for this character
-          const sequence = generateCharSequence(currentChar, targetChar);
-          setCharSequences(prev => ({...prev, [charKey]: sequence}));
-          setCharIndexKey(prev => ({...prev, [charKey]: 0}));
-          
-          // Schedule this character to start animating after a delay based on position
-          const charDelay = (i % CHARS_PER_LINE) * SEQUENTIAL_DELAY + 
-                          Math.floor(i / CHARS_PER_LINE) * SEQUENTIAL_DELAY * 2;
-          
-          // Start with the first intermediate character immediately
-          if (sequence.length > 1) {
-            newDisplayText[i] = sequence[0];
-          }
-          
-          // Schedule animation to start
-          setTimeout(() => {
-            // Apply the CSS animation class
-            const updatedAnimations = { ...animatingChars };
-            updatedAnimations[charKey] = true;
-            setAnimatingChars(updatedAnimations);
-            
-            // Schedule character to update halfway through the animation
-            setTimeout(() => {
-              setDisplayText(current => {
-                const updated = current.split('');
-                const sequence = charSequences[charKey] || [];
-                if (sequence.length > 1) {
-                  updated[i] = sequence[1]; // Show middle character during animation
-                }
-                return updated.join('');
-              });
-            }, ANIMATION_SPEED * 0.5);
-            
-            // Schedule animation to complete
-            setTimeout(() => {
-              setDisplayText(current => {
-                const updated = current.split('');
-                updated[i] = targetChar; // Final character
-                return updated.join('');
-              });
-              
-              setAnimatingChars(prev => {
-                const updated = { ...prev };
-                updated[charKey] = false;
-                return updated;
-              });
-            }, ANIMATION_SPEED);
-          }, charDelay);
+    // If no animation needed (same char), just ensure display is correct
+    if (sequence.length <= 1) {
+      setDisplayLines(prev => {
+        const newLines = [...prev];
+        if (newLines[lineIndex]) {
+          newLines[lineIndex] = 
+            newLines[lineIndex].substring(0, colIndex) +
+            endChar +
+            newLines[lineIndex].substring(colIndex + 1);
         }
-      }
-    }
-    
-    // Check if all animations are complete
-    if (!Object.values(newAnimatingChars).some(Boolean)) {
-      setIsAnimating(false);
-      if (isPlaying && currentQueueIndex < messageQueue.length - 1) {
-        setTimeout(() => {
-          setCurrentQueueIndex(i => i + 1);
-        }, interval - 3000);
-      }
-    }
-  }, [displayText, targetText, isPlaying, currentQueueIndex, messageQueue.length, interval, 
-      animatingChars, charSequences, charIndexKey]);
-
-  useEffect(() => {
-    let timer: number;
-    if (isAnimating) {
-      timer = window.setInterval(updateText, ANIMATION_SPEED);
-    }
-    return () => window.clearInterval(timer);
-  }, [isAnimating, updateText]);
-
-  // Effect for auto-playing queue
-  useEffect(() => {
-    if (isPlaying && messageQueue.length > 0) {
-      const message = messageQueue[currentQueueIndex];
-      if (message) {
-        displayMessage(message);
-      }
-    }
-  }, [isPlaying, currentQueueIndex, messageQueue]);
-
-  // Add effect to load initial messages and set up realtime subscription
-  useEffect(() => {
-    // Fetch initial messages
-    const fetchMessages = async () => {
-      setIsLoading(true);
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (data && !error) {
-        setMessages(data);
-      }
-      setIsLoading(false);
-    };
-
-    fetchMessages();
-
-    // Set up realtime subscription for both inserts and deletes
-    const channel = supabase
-      .channel('messages')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages'
-        },
-        (payload) => {
-          console.log('New message received:', payload);
-          const newMessage = payload.new as Message;
-          setMessages(current => [newMessage, ...current]);
-          displayMessage(newMessage.content);
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'messages'
-        },
-        (payload) => {
-          console.log('Message deleted:', payload);
-          const deletedId = payload.old.id;
-          setMessages(current => current.filter(msg => msg.id !== deletedId));
-        }
-      )
-      .subscribe((status) => {
-        console.log('Subscription status:', status);
+        return newLines;
       });
+      return;
+    }
 
-    // Cleanup subscription
-    return () => {
-      channel.unsubscribe();
-    };
-  }, []);
+    // Store sequence and reset index
+    setCharSequences(prev => ({...prev, [charKey]: sequence}));
+    setCharIndexKey(prev => ({...prev, [charKey]: 1})); // Start aiming for the second char (index 1)
+    setAnimatingChars(prev => ({...prev, [charKey]: true}));
 
-  const displayMessage = (text: string) => {
-    const trimmedText = text.slice(0, MAX_CHARS).padEnd(MAX_CHARS, ' ').toUpperCase();
-    setTargetText(trimmedText);
-    setIsAnimating(true);
-    setAnimatingChars({}); // Reset animating state for new message
-  };
+    let step = 1; // Current target index in sequence
 
-  const handleSubmit = async () => {
-    if (!inputText.trim()) return;
-
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .insert([{ content: inputText }])
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Error saving message:', error);
+    const runStep = () => {
+      // If we've reached the end of the sequence
+      if (step >= sequence.length) {
+        setAnimatingChars(prev => ({...prev, [charKey]: false}));
+        setFlippingChars(prev => ({...prev, [charKey]: false}));
+        delete activeAnimationsRef.current[charKey];
+        
+        // Ensure final state is correct
+        setDisplayLines(prev => {
+          const newLines = [...prev];
+          if (newLines[lineIndex]) {
+            newLines[lineIndex] = 
+              newLines[lineIndex].substring(0, colIndex) +
+              endChar +
+              newLines[lineIndex].substring(colIndex + 1);
+          }
+          return newLines;
+        });
         return;
       }
 
-      // Don't update local state here, let the subscription handle it
-      setInputText('');
-    } catch (error) {
-      console.error('Error in handleSubmit:', error);
-    }
-  };
+      // Start visual flip
+      setFlippingChars(prev => ({...prev, [charKey]: true}));
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (messages.length > 0) {
-        const newIndex = historyIndex + 1;
-        if (newIndex < messages.length) {
-          setHistoryIndex(newIndex);
-          setInputText(messages[newIndex].content);
+      // Calculate delay for the NEXT flip (easing)
+      // We want to slow down as we approach the end
+      const remainingSteps = sequence.length - 1 - step;
+      let nextDelay = 20; // Default fast speed (continuous)
+      
+      // Easing logic: add delay between flips for the last few items
+      // More pronounced drag effect
+      if (remainingSteps < 6) {
+        // Exponential-ish slowdown
+        const slowdown = [400, 250, 150, 90, 50, 30]; 
+        nextDelay = slowdown[remainingSteps] || 20;
+      }
+
+      // Schedule the completion of this flip
+      const timeoutId = setTimeout(() => {
+        // Flip complete: Update the "settled" character on the board
+        const settledChar = sequence[step];
+        setDisplayLines(prev => {
+          const newLines = [...prev];
+          if (newLines[lineIndex]) {
+            newLines[lineIndex] = 
+              newLines[lineIndex].substring(0, colIndex) +
+              settledChar +
+              newLines[lineIndex].substring(colIndex + 1);
+          }
+          return newLines;
+        });
+
+        // Stop visual flip
+        setFlippingChars(prev => ({...prev, [charKey]: false}));
+
+        // Prepare for next flip if there is one
+        step++;
+        if (step < sequence.length) {
+          setCharIndexKey(prev => ({...prev, [charKey]: step}));
+          // Wait for the calculated delay before starting next flip
+          activeAnimationsRef.current[charKey] = setTimeout(runStep, nextDelay);
+        } else {
+          // Done
+          setAnimatingChars(prev => ({...prev, [charKey]: false}));
+          delete activeAnimationsRef.current[charKey];
+        }
+      }, ANIMATION_SPEED); // Wait for the visual flip to finish
+      
+      activeAnimationsRef.current[charKey] = timeoutId;
+    };
+
+    // Start the first flip immediately (or with wave delay handled by caller)
+    runStep();
+  }, []);
+
+
+  // Effect to trigger animations when targetLines changes
+  useEffect(() => {
+    let hasChanges = false;
+    
+    // Iterate through all positions to find changes
+    for (let lineIndex = 0; lineIndex < NUM_LINES; lineIndex++) {
+      const targetLine = targetLines[lineIndex] || ' '.repeat(CHARS_PER_LINE);
+      const currentLine = displayLines[lineIndex] || ' '.repeat(CHARS_PER_LINE);
+      
+      for (let colIndex = 0; colIndex < CHARS_PER_LINE; colIndex++) {
+        const currentChar = currentLine[colIndex] || ' ';
+        const targetChar = targetLine[colIndex] || ' ';
+        
+        if (currentChar !== targetChar) {
+          hasChanges = true;
+          
+          // Calculate wave delay
+          const waveDelay = colIndex * SEQUENTIAL_DELAY + lineIndex * SEQUENTIAL_DELAY * 2;
+          
+          setTimeout(() => {
+            animateCharacter(lineIndex, colIndex, currentChar, targetChar);
+          }, waveDelay);
         }
       }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (historyIndex > -1) {
-        const newIndex = historyIndex - 1;
-        setHistoryIndex(newIndex);
-        setInputText(newIndex === -1 ? '' : messages[newIndex].content);
+    }
+    
+    if (hasChanges) {
+      setIsAnimating(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetLines, animateCharacter]); // Only trigger when target changes
+
+  // Poller to check if animations are done
+  useEffect(() => {
+    const checkDone = window.setInterval(() => {
+      const isAnyAnimating = Object.values(animatingChars).some(Boolean);
+      if (!isAnyAnimating && isAnimating) {
+        setIsAnimating(false);
+        
+        // Queue logic
+        if (isPlaying && currentQueueIndex < messageQueue.length - 1) {
+           // Wait a bit before next message
+           setTimeout(() => {
+             setCurrentQueueIndex(i => i + 1);
+           }, interval - 3000);
+        }
       }
-    }
-  };
-
-  const addToQueue = () => {
-    if (newQueueMessage.trim()) {
-      setMessageQueue((prev) => [...prev, newQueueMessage]);
-      setNewQueueMessage('');
-    }
-  };
-
-  const removeFromQueue = (index: number) => {
-    setMessageQueue(prev => prev.filter((_, i) => i !== index));
-    if (currentQueueIndex >= index) {
-      setCurrentQueueIndex(prev => Math.max(0, prev - 1));
-    }
-  };
-
-  const togglePlayback = () => {
-    if (!isPlaying && messageQueue.length > 0) {
-      setCurrentQueueIndex(0);
-    }
-    setIsPlaying(!isPlaying);
-  };
+    }, 500);
+    return () => window.clearInterval(checkDone);
+  }, [animatingChars, isAnimating, isPlaying, currentQueueIndex, messageQueue.length, interval]);
 
   // Modify the display lines logic to handle word wrapping
-  const formatDisplayLines = (text: string) => {
+  const formatDisplayLines = useCallback((text: string) => {
     const lines: string[] = Array(NUM_LINES).fill('');
     const textLines = text.split('\n');
     
@@ -447,15 +367,163 @@ const SplitFlapDisplay = () => {
     }
 
     return lines;
+  }, [textAlignment, verticalAlignment]);
+
+  const displayMessage = useCallback((text: string) => {
+    const trimmedText = text.slice(0, MAX_CHARS).padEnd(MAX_CHARS, ' ').toUpperCase();
+    
+    // Pre-calculate the wrapped layout so we know exactly where each character will be
+    const wrappedLines = formatDisplayLines(trimmedText);
+    setTargetLines(wrappedLines);
+    
+    // We don't clear animations here anymore; the useEffect will handle diffs
+    // and animateCharacter will restart animations for changed characters.
+    
+    setIsAnimating(true);
+  }, [formatDisplayLines]);
+
+  // Effect for auto-playing queue
+  useEffect(() => {
+    if (isPlaying && messageQueue.length > 0) {
+      const message = messageQueue[currentQueueIndex];
+      if (message) {
+        displayMessage(message);
+      }
+    }
+  }, [isPlaying, currentQueueIndex, messageQueue, displayMessage]);
+
+  // Add effect to load initial messages and set up realtime subscription
+  useEffect(() => {
+    // Fetch initial messages
+    const fetchMessages = async () => {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (data && !error) {
+        setMessages(data);
+      }
+      setIsLoading(false);
+    };
+
+    fetchMessages();
+
+    // Set up realtime subscription for both inserts and deletes
+    const channel = supabase
+      .channel('messages')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages'
+        },
+        (payload) => {
+          console.log('New message received:', payload);
+          const newMessage = payload.new as Message;
+          setMessages(current => [newMessage, ...current]);
+          displayMessage(newMessage.content);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'messages'
+        },
+        (payload) => {
+          console.log('Message deleted:', payload);
+          const deletedId = payload.old.id;
+          setMessages(current => current.filter(msg => msg.id !== deletedId));
+        }
+      )
+      .subscribe((status) => {
+        console.log('Subscription status:', status);
+      });
+
+    // Cleanup subscription
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [displayMessage]);
+
+  const handleSubmit = async () => {
+    if (!inputText.trim()) return;
+
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .insert([{ content: inputText }])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving message:', error);
+        return;
+      }
+
+      // Don't update local state here, let the subscription handle it
+      setInputText('');
+    } catch (error) {
+      console.error('Error in handleSubmit:', error);
+    }
   };
 
-  // Replace the displayLines calculation in the render section with:
-  const displayLines = formatDisplayLines(displayText);
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (messages.length > 0) {
+        const newIndex = historyIndex + 1;
+        if (newIndex < messages.length) {
+          setHistoryIndex(newIndex);
+          setInputText(messages[newIndex].content);
+        }
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex > -1) {
+        const newIndex = historyIndex - 1;
+        setHistoryIndex(newIndex);
+        setInputText(newIndex === -1 ? '' : messages[newIndex].content);
+      }
+    }
+  };
+
+  const addToQueue = () => {
+    if (newQueueMessage.trim()) {
+      setMessageQueue((prev) => [...prev, newQueueMessage]);
+      setNewQueueMessage('');
+    }
+  };
+
+  const removeFromQueue = (index: number) => {
+    setMessageQueue(prev => prev.filter((_, i) => i !== index));
+    if (currentQueueIndex >= index) {
+      setCurrentQueueIndex(prev => Math.max(0, prev - 1));
+    }
+  };
+
+  const togglePlayback = () => {
+    if (!isPlaying && messageQueue.length > 0) {
+      setCurrentQueueIndex(0);
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+
+  // Use displayLines state directly - it's already in the wrapped format
+  // No need to recalculate from displayText since we update displayLines directly
 
   // Add the delete handler function
   const handleDelete = async (id: number) => {
     try {
-      setIsDeleting(true);
       const { error } = await supabase
         .from('messages')
         .delete()
@@ -470,8 +538,6 @@ const SplitFlapDisplay = () => {
       setMessages(current => current.filter(msg => msg.id !== id));
     } catch (error) {
       console.error('Error in handleDelete:', error);
-    } finally {
-      setIsDeleting(false);
     }
   };
 
@@ -491,14 +557,61 @@ const SplitFlapDisplay = () => {
     const timer = window.setInterval(displayRandomQuote, quoteInterval * 60 * 1000);
     
     return () => window.clearInterval(timer);
-  }, [autoQuoteEnabled, quoteInterval]);
+  }, [autoQuoteEnabled, quoteInterval, displayMessage]);
+
+  // Auto-hide icons after mouse inactivity
+  useEffect(() => {
+    const handleMouseMove = () => {
+      // Show icons when mouse moves
+      setIconsVisible(true);
+      
+      // Clear existing timeout
+      if (inactivityTimeoutRef.current) {
+        clearTimeout(inactivityTimeoutRef.current);
+      }
+      
+      // Set new timeout to hide icons
+      inactivityTimeoutRef.current = setTimeout(() => {
+        setIconsVisible(false);
+      }, INACTIVITY_DELAY);
+    };
+
+    // Initial timeout to hide icons after inactivity
+    inactivityTimeoutRef.current = setTimeout(() => {
+      setIconsVisible(false);
+    }, INACTIVITY_DELAY);
+
+    // Add mouse move listener
+    window.addEventListener('mousemove', handleMouseMove);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      if (inactivityTimeoutRef.current) {
+        clearTimeout(inactivityTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
       {/* Top right buttons */}
-      <div className="fixed top-8 right-8 flex items-center space-x-3">
+      <div 
+        className={`fixed top-4 right-4 md:top-8 md:right-8 flex items-center space-x-2 md:space-x-3 transition-opacity duration-500 ${
+          iconsVisible ? 'opacity-100' : 'opacity-0'
+        }`}
+        onMouseEnter={() => setIconsVisible(true)}
+        onMouseMove={() => {
+          setIconsVisible(true);
+          if (inactivityTimeoutRef.current) {
+            clearTimeout(inactivityTimeoutRef.current);
+          }
+          inactivityTimeoutRef.current = setTimeout(() => {
+            setIconsVisible(false);
+          }, INACTIVITY_DELAY);
+        }}
+      >
         {/* Theme Toggle Button */}
-        <ThemeToggle />
+        {/* <ThemeToggle /> */}
         
         {/* Settings Button */}
         <Dialog>
@@ -514,11 +627,11 @@ const SplitFlapDisplay = () => {
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700
-            fixed top-24 right-8 translate-x-0 translate-y-0
+            fixed top-16 right-4 md:top-24 md:right-8 translate-x-0 translate-y-0
             animate-in fade-in-0 zoom-in-95 duration-150 ease-out
             data-[state=closed]:animate-out data-[state=closed]:fade-out-0 
             data-[state=closed]:zoom-out-95 data-[state=closed]:duration-150 
-            data-[state=closed]:ease-in-out"
+            data-[state=closed]:ease-in-out max-h-[90vh] overflow-y-auto"
           >
             <DialogHeader>
               <DialogTitle>Display Settings</DialogTitle>
@@ -690,16 +803,16 @@ const SplitFlapDisplay = () => {
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px] bg-slate-900/95 text-white border-slate-700
-            fixed top-24 right-8 translate-x-0 translate-y-0
+            fixed top-16 right-4 md:top-24 md:right-8 translate-x-0 translate-y-0
             animate-in fade-in-0 zoom-in-95 duration-150 ease-out
             data-[state=closed]:animate-out data-[state=closed]:fade-out-0 
             data-[state=closed]:zoom-out-95 data-[state=closed]:duration-150 
-            data-[state=closed]:ease-in-out"
+            data-[state=closed]:ease-in-out max-h-[90vh] overflow-y-auto"
           >
             <DialogHeader>
               <DialogTitle>Message History</DialogTitle>
             </DialogHeader>
-            <ScrollArea className="h-[400px]">
+            <ScrollArea className="h-[300px] md:h-[400px]">
               {isLoading ? (
                 <div className="flex items-center justify-center h-20 text-slate-500">
                   Loading messages...
@@ -740,58 +853,31 @@ const SplitFlapDisplay = () => {
         </Dialog>
       </div>
 
-      <div className="flex-grow flex items-center">
-        <div className="bg-slate-900/50 p-12 rounded-lg backdrop-blur-sm">
-          <div className="font-mono text-3xl space-y-3">
+      <div className="flex-grow flex items-start justify-center pt-4 mt-4 md:pt-16 md:mt-16 w-full px-2 md:px-0">
+        <div className="bg-slate-900/50 p-2 md:p-12 rounded-lg backdrop-blur-sm max-w-full">
+          <div className="font-mono text-xl md:text-5xl space-y-0.5 md:space-y-3">
             {displayLines.map((line, lineIndex) => (
-              <div key={lineIndex} className="flex justify-center">
+              <div key={lineIndex} className="flex justify-center flex-nowrap">
                 {line.split('').map((char, charIndex) => {
                   const charKey = `${lineIndex}-${charIndex}`;
                   const isAnimating = animatingChars[charKey];
+                  const isFlipping = flippingChars[charKey];
+                  const sequence = charSequences[charKey] || [char];
+                  const currentCharIndex = charIndexKey[charKey];
                   
-                  // Fallback container if the animation container fails
+                  // When animating: top shows current char, bottom shows target char from sequence
+                  // When not animating: both show the same character (current)
+                  const nextChar = isAnimating && currentCharIndex !== undefined 
+                    ? (sequence[currentCharIndex] || sequence[sequence.length - 1] || char)
+                    : char;
+                  
                   return (
-                    <div
+                    <SplitFlapChar
                       key={charIndex}
-                      className="relative w-12 mx-1 h-16 bg-slate-800/40 rounded"
-                      style={{ perspective: '1000px' }}
-                    >
-                      <div
-                        className={`
-                          absolute inset-0 w-full h-full text-center flex items-center justify-center
-                          transition-transform duration-300 ease-in-out
-                          ${isAnimating ? 'animate-flip-down' : ''}
-                        `}
-                        style={{
-                          transformOrigin: 'center center',
-                          transformStyle: 'preserve-3d',
-                          backfaceVisibility: 'hidden',
-                        }}
-                      >
-                        <span
-                          className="flex items-center justify-center w-full h-full bg-slate-800/80 rounded transition-all border border-slate-700/30 relative overflow-hidden"
-                          style={{
-                            textShadow: '0 0 5px rgba(255,255,255,0.3)',
-                            boxShadow: isAnimating ? 
-                              '0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3)' : 
-                              '0 1px 2px rgba(0,0,0,0.1)'
-                          }}
-                        >
-                          {/* Split-flap divider line */}
-                          <div className="absolute w-full h-[1px] bg-slate-600/80 top-1/2 transform -translate-y-1/2 z-10 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"></div>
-                          {/* Top flap shadow */}
-                          <div className={`absolute w-full h-[3px] bg-gradient-to-b from-transparent to-black/20 bottom-1/2 z-5 
-                            ${isAnimating ? 'opacity-60' : 'opacity-40'}`}></div>
-                          {/* Bottom flap highlight */}
-                          <div className={`absolute w-full h-[2px] bg-gradient-to-b from-white/10 to-transparent top-1/2 z-5
-                            ${isAnimating ? 'opacity-80' : 'opacity-20'}`}></div>
-                          
-                          <span className={char === ' ' ? 'text-slate-700' : 'text-white'}>
-                            {char === ' ' ? '•' : char}
-                          </span>
-                        </span>
-                      </div>
-                    </div>
+                      char={char}
+                      nextChar={nextChar}
+                      isAnimating={!!isFlipping}
+                    />
                   );
                 })}
               </div>
@@ -801,8 +887,8 @@ const SplitFlapDisplay = () => {
       </div>
 
       {/* Message Input */}
-      <div className="fixed bottom-12 left-1/2 -translate-x-1/2">
-        <div className="relative w-80">
+      <div className="fixed bottom-4 md:bottom-12 left-1/2 -translate-x-1/2 w-full px-4 md:px-0 md:w-auto">
+        <div className="relative w-full max-w-[calc(100vw-2rem)] md:w-80">
           <div 
             className={`relative bg-slate-800/60 rounded-xl shadow-lg backdrop-blur-sm overflow-hidden transition-all
               ${isFocused ? 'ring-2 ring-blue-500/70 ring-offset-2 ring-offset-slate-950' : 'ring-1 ring-slate-600/60'}`}
@@ -815,7 +901,7 @@ const SplitFlapDisplay = () => {
               onBlur={() => setIsFocused(false)}
               placeholder="Type your message..."
               maxLength={MAX_CHARS}
-              className="w-full bg-transparent border-0 resize-none text-white placeholder:text-slate-400 focus:ring-0 focus:outline-none pr-12 p-3 h-[70px] overflow-hidden"
+              className="w-full bg-transparent border-0 resize-none text-white placeholder:text-slate-400 focus:ring-0 focus:outline-none pr-10 md:pr-12 p-2 md:p-3 h-[60px] md:h-[70px] overflow-hidden text-sm md:text-base"
               style={{ 
                 WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 85%, transparent 100%)'
               }}
@@ -851,4 +937,3 @@ const SplitFlapDisplay = () => {
 };
 
 export default SplitFlapDisplay;
-
